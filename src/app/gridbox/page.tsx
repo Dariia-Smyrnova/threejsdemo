@@ -73,6 +73,44 @@ interface PlacedShape {
     y: number;
 }
 
+// Add this helper function before the GridBox component
+function getShapeEdgeCoordinates(baseX: number, baseY: number, shape: number[][]) {
+    return shape.map(([offsetX, offsetY]) => ({
+        x: baseX + offsetX,
+        y: baseY + offsetY
+    }));
+}
+
+// Add this helper function to check if a cell is occupied
+function isPositionOccupied(x: number, y: number, placedShapes: PlacedShape[]): boolean {
+    return placedShapes.some(placedShape => 
+        placedShape.shape.some(([offsetX, offsetY]) => 
+            placedShape.x + offsetX === x && placedShape.y + offsetY === y
+        )
+    );
+}
+
+// Add this function to check if a shape can be placed
+function canPlaceShape(baseX: number, baseY: number, shape: number[][], placedShapes: PlacedShape[]): boolean {
+    return shape.every(([offsetX, offsetY]) => {
+        const x = baseX + offsetX;
+        const y = baseY + offsetY;
+        return !isPositionOccupied(x, y, placedShapes);
+    });
+}
+
+// Add this function to get overlapping cells
+function getOverlappingCells(baseX: number, baseY: number, shape: number[][], placedShapes: PlacedShape[]): {x: number, y: number}[] {
+    return shape.reduce<{x: number, y: number}[]>((overlaps, [offsetX, offsetY]) => {
+        const x = baseX + offsetX;
+        const y = baseY + offsetY;
+        if (isPositionOccupied(x, y, placedShapes)) {
+            overlaps.push({ x, y });
+        }
+        return overlaps;
+    }, []);
+}
+
 function GridBox(props: any) {
     const canvasRef = useRef<HTMLCanvasElement>(document.createElement("canvas"));
     const textureRef = useRef<any>();
@@ -80,18 +118,47 @@ function GridBox(props: any) {
     const mouseUV = useRef(new Vector2());
     const context = useRef<CanvasRenderingContext2D | null>(canvasRef.current.getContext("2d"));
     const [isDragging, setIsDragging] = useState(false);
-    const [currentShape, setCurrentShape] = useState<ShapeType>("cross");
+    const [currentShape, setCurrentShape] = useState<ShapeType>("lShape");
     const [placedShapes, setPlacedShapes] = useState<PlacedShape[]>([]);
+    const [draggedShape, setDraggedShape] = useState<PlacedShape | null>(null);
+    const [previewPosition, setPreviewPosition] = useState({ x: 0, y: gridSize - 1 }); // Upper left corner
+    const [overlappingCells, setOverlappingCells] = useState<{x: number, y: number}[]>([]);
 
     const handleClick = (e: any) => {
         const cellX = Math.floor(e.uv.x * gridSize);
         const cellY = 16 - Math.floor(e.uv.y * gridSize);
         
-        setPlacedShapes(prev => [...prev, {
-            shape: shapes[currentShape],
-            x: cellX,
-            y: cellY
-        }]);
+        if (!isDragging) {
+            // Start dragging
+            setIsDragging(true);
+            const shapeArray = shapes[currentShape] as number[][];
+            setDraggedShape({
+                shape: shapeArray,
+                x: previewPosition.x,
+                y: previewPosition.y
+            });
+        } else {
+            // Try to place the shape
+            const shapeArray = shapes[currentShape] as number[][];
+            
+            if (canPlaceShape(cellX, cellY, shapeArray, placedShapes)) {
+                setIsDragging(false);
+                
+                const edgeCoordinates = getShapeEdgeCoordinates(cellX, cellY, shapeArray);
+                console.log('Shape placed at:', {
+                    basePosition: { x: cellX, y: cellY },
+                    edges: edgeCoordinates
+                });
+
+                setPlacedShapes(prev => [...prev, {
+                    shape: shapeArray,
+                    x: cellX,
+                    y: cellY
+                }]);
+                setDraggedShape(null);
+                setOverlappingCells([]);
+            }
+        }
     };
 
     // Cycle through shapes on right click
@@ -101,6 +168,26 @@ function GridBox(props: any) {
         const currentIndex = shapeKeys.indexOf(currentShape);
         const nextIndex = (currentIndex + 1) % shapeKeys.length;
         setCurrentShape(shapeKeys[nextIndex]);
+    };
+
+    // Add a new handler for mouse movement during drag
+    const handlePointerMove = (e: any) => {
+        const cellX = Math.floor(e.uv.x * gridSize);
+        const cellY = 16 - Math.floor(e.uv.y * gridSize);
+        
+        if (isDragging) {
+            setDraggedShape(prev => prev ? {
+                ...prev,
+                x: cellX,
+                y: cellY
+            } : null);
+
+            // Update overlapping cells
+            if (draggedShape) {
+                const overlaps = getOverlappingCells(cellX, cellY, draggedShape.shape, placedShapes);
+                setOverlappingCells(overlaps);
+            }
+        }
     };
 
     useFrame(() => {
@@ -116,18 +203,42 @@ function GridBox(props: any) {
             drawShape(ctx, gridSize, canvasSize, x, y, shape, "white");
         });
 
-        // Draw current shape preview at mouse position
-        const previewX = Math.floor(mouseUV.current.x * gridSize);
-        const previewY = 16 - Math.floor(mouseUV.current.y * gridSize);
-        drawShape(
-            ctx,
-            gridSize,
-            canvasSize,
-            previewX,
-            previewY,
-            shapes[currentShape],
-            "rgba(255, 255, 255, 0.5)"
-        );
+        // Draw either the preview in upper left or the dragging shape
+        if (isDragging && draggedShape) {
+            // Draw the shape
+            drawShape(
+                ctx,
+                gridSize,
+                canvasSize,
+                draggedShape.x,
+                draggedShape.y,
+                draggedShape.shape,
+                "rgba(255, 255, 255, 0.5)"
+            );
+
+            // Draw overlapping cells in red
+            overlappingCells.forEach(({x, y}) => {
+                drawCell(
+                    ctx,
+                    gridSize,
+                    canvasSize,
+                    x,
+                    y,
+                    "rgba(255, 0, 0, 0.5)"
+                );
+            });
+        } else {
+            // Draw preview in upper left corner
+            drawShape(
+                ctx,
+                gridSize,
+                canvasSize,
+                previewPosition.x,
+                previewPosition.y,
+                shapes[currentShape] as number[][],
+                "rgba(255, 255, 255, 0.5)"
+            );
+        }
         
         drawGrid(ctx, gridSize, canvasSize);
 
@@ -140,7 +251,7 @@ function GridBox(props: any) {
         <group ref={group} {...props}>
             <mesh
                 rotation={[degToRad(-90), 0, 0]}
-                onPointerMove={(e) => (mouseUV.current = e.uv)}
+                onPointerMove={handlePointerMove}
                 onClick={handleClick}
                 onContextMenu={handleContextMenu}
                 onPointerOver={() => document.body.style.cursor = "none"}
@@ -175,7 +286,7 @@ export default function GridBoxPage() {
                 padding: '10px',
                 borderRadius: '5px'
             }}>
-                Right-click to change shape
+                Click to drag shape • Right-click to change shape
             </div>
         </div>
     );

@@ -1,7 +1,10 @@
-import { useFrame } from "@react-three/fiber"
+import { useFrame, useLoader } from "@react-three/fiber"
 import { useRef, useState } from "react"
+import { TextureLoader } from 'three/src/loaders/TextureLoader'
 
 export const Sphere = ({ position, color, args }) => {
+    const colorMap = useLoader(TextureLoader, 'textures/matcaps/8.png')
+
     const ref = useRef()
     let [isHovered, setIsHovered] = useState(false)
 
@@ -16,8 +19,8 @@ export const Sphere = ({ position, color, args }) => {
             onPointerLeave={() => setIsHovered(false)}
         >
             <sphereGeometry args={args} />
-            <meshStandardMaterial
-                color={color}
+            <meshMatcapMaterial
+                matcap={colorMap}
             />
         </mesh>
     )
